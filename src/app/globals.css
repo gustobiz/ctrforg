@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 5.5%;
+    --card-foreground: 240 5% 90%;
+
+    --popover: 240 10% 4.5%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 142.1 70.6% 45.3%;
+    --primary-foreground: 144.4 96.6% 11.4%;
+
+    --secondary: 240 5.9% 10%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 240 5.9% 10%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 12%;
+    --input: 240 5.9% 12%;
+    --ring: 142.1 70.6% 45.3%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 5.5%;
+    --card-foreground: 240 5% 90%;
+
+    --popover: 240 10% 4.5%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 142.1 70.6% 45.3%;
+    --primary-foreground: 144.4 96.6% 11.4%;
+
+    --secondary: 240 5.9% 10%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 5% 15%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 240 5.9% 10%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 12%;
+    --input: 240 5.9% 12%;
+    --ring: 142.1 70.6% 45.3%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-emerald-500/20 selection:text-emerald-300;
+    background-color: #09090b;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(20, 20, 25, 0.3) 0, transparent 50%),
+      radial-gradient(at 50% 0%, rgba(16, 185, 129, 0.02) 0, transparent 40%);
+  }
+}
+
+/* Premium Workspace Glassmorphism & Custom Elements */
+.glass-panel {
+  @apply backdrop-blur-xl bg-zinc-900/40 border border-white/[0.04] shadow-2xl;
+}
+
+.workspace-input {
+  @apply bg-zinc-900/60 border border-white/[0.06] rounded-xl focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20 transition-all text-sm outline-none;
+}
+
+.btn-premium {
+  @apply inline-flex items-center justify-center rounded-lg text-xs font-semibold h-9 px-4 transition-all duration-200;
+}
+
+.btn-premium-primary {
+  @apply btn-premium bg-zinc-100 text-zinc-950 hover:bg-white active:scale-[0.98] shadow-sm;
+}
+
+.btn-premium-secondary {
+  @apply btn-premium bg-zinc-900/60 text-zinc-300 border border-white/[0.06] hover:bg-zinc-800/80 hover:text-white active:scale-[0.98];
+}
+
+.btn-premium-accent {
+  @apply btn-premium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 hover:text-emerald-300 active:scale-[0.98];
+}
+
+/* Custom Scrollbar for sleek Linear/ChatGPT feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Sub-pixel smooth Transitions */
+.smooth-transition {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
