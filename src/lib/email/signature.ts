@@ -21,8 +21,12 @@ export interface UserSignature {
   is_enabled: boolean;
 }
 
+export function getPublicPortfolioUrl(): string {
+  return process.env.NEXT_PUBLIC_PORTFOLIO_URL || process.env.PORTFOLIO_URL || 'https://gustostudio.vercel.app';
+}
+
 export const AVAILABLE_SOCIAL_LINKS: { id: string; label: string; defaultUrlPlaceholder?: string }[] = [
-  { id: 'portfolio', label: 'Portfolio', defaultUrlPlaceholder: 'https://gustostudio.com' },
+  { id: 'portfolio', label: 'Portfolio', defaultUrlPlaceholder: 'https://gustostudio.vercel.app' },
   { id: 'website', label: 'Website', defaultUrlPlaceholder: 'https://yourwebsite.com' },
   { id: 'linkedin', label: 'LinkedIn', defaultUrlPlaceholder: 'https://linkedin.com/in/username' },
   { id: 'twitter', label: 'X', defaultUrlPlaceholder: 'https://x.com/username' },

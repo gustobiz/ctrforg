@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { GmailLabelService } from '@/lib/gmail/label-service';
+import { calculateNextEligibleSendTime, isDateInsideSendWindow, formatDateTimeInTimezone } from '@/lib/gmail/schedule-utils';
+import { saveCampaignSettings, getCampaignSettings, CampaignSettings } from '@/lib/campaigns/settings';
+import { processNextBatch } from '@/lib/gmail/campaign-engine';
 
 function getLeadEmail(lead: any): string {
   if (!lead) return '';
@@ -34,7 +37,7 @@ export async function GET() {
 
     if (error) throw error;
 
-    const formattedCampaigns = (campaigns || []).map((c: any) => {
+    const formattedCampaigns = await Promise.all((campaigns || []).map(async (c: any) => {
       const labelName = `CTRForge/Campaigns/${c.name}`;
       
       // Async backfill in background for existing campaigns missing labels
@@ -44,11 +47,19 @@ export async function GET() {
         });
       }
 
+      const settings = await getCampaignSettings(c.id);
+
       return {
         ...c,
+        send_window_start: settings.sendWindowStart,
+        send_window_end: settings.sendWindowEnd,
+        send_window_tz: settings.sendWindowTz,
+        send_window_days: settings.sendWindowDays,
+        schedule_mode: settings.scheduleMode,
+        scheduled_at: settings.scheduledAt,
         gmail_label_name: labelName,
       };
-    });
+    }));
 
     return NextResponse.json({ success: true, campaigns: formattedCampaigns });
   } catch (error: any) {
@@ -79,6 +90,7 @@ export async function POST(req: Request) {
       followupRules = [],
       leadSourceType = 'crm',
       leadSourceId = null,
+      scheduleMode = 'immediate',
       scheduledAt = null,
       sendWindowStart = '09:00',
       sendWindowEnd = '17:00',
@@ -89,6 +101,8 @@ export async function POST(req: Request) {
     if (!name) {
       return NextResponse.json({ error: 'Campaign name is required' }, { status: 400 });
     }
+
+    console.log(`[CampaignCreate] Request received: name="${name}", mode=${scheduleMode}, tz=${sendWindowTz}, leadsCount=${leadIds.length}`);
 
     // Fetch and validate selected leads
     let fetchedLeads: any[] = [];
@@ -127,8 +141,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No valid email addresses found in the selected lead source.' }, { status: 400 });
     }
 
-    // Create bulk campaign payload (omitting non-existent lead_source_id / lead_source_type columns)
-    const initialStatus = scheduledAt && new Date(scheduledAt) > new Date() ? 'scheduled' : 'draft';
+    const windowConfig = {
+      sendWindowStart: sendWindowStart || '09:00',
+      sendWindowEnd: sendWindowEnd || '17:00',
+      sendWindowTz: sendWindowTz || 'UTC',
+      sendWindowDays: Array.isArray(sendWindowDays) ? sendWindowDays : [1, 2, 3, 4, 5],
+    };
+
+    const isImmediate = scheduleMode === 'immediate';
+    const isFutureSchedule = !isImmediate && scheduledAt && new Date(scheduledAt).getTime() > Date.now();
+    const nowInsideWindow = isDateInsideSendWindow(new Date(), windowConfig);
+
+    // Immediate launch mode always starts running NOW.
+    // Scheduled mode starts in 'scheduled' status.
+    let initialStatus = isImmediate ? 'running' : 'scheduled';
+    let initialQueueSendTime = new Date();
+
+    if (!isImmediate) {
+      const baseScheduleDate = isFutureSchedule ? new Date(scheduledAt) : new Date();
+      initialQueueSendTime = calculateNextEligibleSendTime(baseScheduleDate, windowConfig);
+    }
+
+    const nowIso = new Date().toISOString();
 
     const insertObj: Record<string, any> = {
       user_id: user.id,
@@ -141,6 +175,7 @@ export async function POST(req: Request) {
       random_delay_max: randomDelayMax,
       total_leads: validLeadsCount,
       status: initialStatus,
+      started_at: initialStatus === 'running' ? nowIso : null,
     };
 
     // Pre-create Gmail labels
@@ -164,9 +199,28 @@ export async function POST(req: Request) {
 
     if (campaignError) throw campaignError;
 
-    // Add leads to campaign
+    // Save comprehensive campaign settings
+    const campaignSettingsToSave: Partial<CampaignSettings> = {
+      sendWindowStart,
+      sendWindowEnd,
+      sendWindowTz,
+      sendWindowDays: Array.isArray(sendWindowDays) ? sendWindowDays : [1, 2, 3, 4, 5],
+      scheduleMode: isImmediate ? 'immediate' : 'scheduled',
+      scheduledAt: isImmediate ? null : scheduledAt,
+      leadSourceType,
+      leadSourceId,
+      followupRules,
+    };
+    await saveCampaignSettings(campaign.id, campaignSettingsToSave, user.id);
+
+    // Add leads to campaign_leads and email_queue
     if (fetchedLeads.length > 0) {
-      const campaignLeads = fetchedLeads.map((lead: any) => ({
+      const validFetchedLeads = fetchedLeads.filter(l => {
+        const email = getLeadEmail(l);
+        return email && email.includes('@');
+      });
+
+      const campaignLeads = validFetchedLeads.map((lead: any) => ({
         campaign_id: campaign.id,
         lead_id: lead.id,
         lead_name: lead.creator_name,
@@ -176,29 +230,64 @@ export async function POST(req: Request) {
       }));
 
       await supabase.from('campaign_leads').insert(campaignLeads);
+
+      const queueRows = validFetchedLeads.map((lead: any) => ({
+        user_id: user.id,
+        campaign_id: campaign.id,
+        lead_id: lead.id,
+        email: getLeadEmail(lead),
+        status: 'queued',
+        scheduled_at: initialQueueSendTime.toISOString(),
+      }));
+
+      const { error: queueErr } = await supabase.from('email_queue').insert(queueRows);
+      if (queueErr) {
+        console.error('Failed to populate initial email_queue:', queueErr);
+      }
     }
 
-    // Add follow-up rules
+    // Add follow-up rules to DB
     if (followupRules.length > 0) {
-      const rules = followupRules.map((rule: any, i: number) => {
-        const r: Record<string, any> = {
-          campaign_id: campaign.id,
-          step_number: i + 1,
-          delay_days: rule.delayDays || 3,
-          rule_type: rule.ruleType || 'not_opened',
-          template_id: rule.templateId || null,
-          use_ai_generation: rule.useAiGeneration !== false,
-        };
-        if (rule.threadMode) {
-          r.thread_mode = rule.threadMode;
-        }
-        return r;
-      });
+      const rules = followupRules.map((rule: any, i: number) => ({
+        campaign_id: campaign.id,
+        step_number: i + 1,
+        delay_days: rule.delayDays || 3,
+        rule_type: rule.ruleType || 'not_opened',
+        template_id: rule.templateId || null,
+        use_ai_generation: rule.useAiGeneration !== false,
+      }));
 
       await supabase.from('campaign_followup_rules').insert(rules);
     }
 
-    return NextResponse.json({ success: true, campaign });
+    let immediateExecutionResult: any = null;
+
+    // IMMEDIATE EXECUTION: If user requested immediate launch, execute first send batch immediately!
+    if (isImmediate) {
+      console.log(`[CampaignCreate] Immediate launch mode: executing first send batch for campaign ${campaign.id}`);
+      try {
+        const batchRes = await processNextBatch(campaign.id, user.id, supabase, { bypassWindow: true });
+        immediateExecutionResult = batchRes;
+        console.log(`[CampaignCreate] First batch result: sent=${batchRes.sent}, remaining=${batchRes.remaining}, completed=${batchRes.completed}, errors=${batchRes.errors.length}`);
+      } catch (execErr: any) {
+        console.error(`[CampaignCreate] Immediate batch execution error:`, execErr);
+        immediateExecutionResult = { error: execErr.message };
+      }
+    }
+
+
+    return NextResponse.json({
+      success: true,
+      campaign: {
+        ...campaign,
+        ...campaignSettingsToSave,
+      },
+      status: initialStatus,
+      isImmediate,
+      insideWindow: nowInsideWindow,
+      nextEligibleSend: formatDateTimeInTimezone(initialQueueSendTime, sendWindowTz),
+      immediateExecution: immediateExecutionResult,
+    });
   } catch (error: any) {
     console.error('Campaign create error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });

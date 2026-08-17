@@ -1,6 +1,9 @@
-"use client";
+const fs = require('fs');
+const path = require('path');
 
-import { useState, useEffect, useRef, Suspense } from 'react';
+const content = `"use client";
+
+import { useState, useEffect, useRef } from 'react';
 import { 
   ArrowLeft, ArrowRight, CheckCircle2, Target, Plus, RefreshCw, 
   Mail, Users, FileText, Settings, Play, ShieldCheck, HelpCircle, 
@@ -9,7 +12,7 @@ import {
   Sparkles, Check, X, PenTool
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import EmailPreview from '@/components/email-preview';
 import { 
@@ -170,7 +173,7 @@ const getBrowserCurrentTime24 = (): string => {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
+  return \`\${h}:\${m}\`;
 };
 
 const getBrowserCurrentDateStr = (): string => {
@@ -178,7 +181,7 @@ const getBrowserCurrentDateStr = (): string => {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return \`\${y}-\${m}-\${d}\`;
 };
 
 const getBrowserTimezoneList = (): string[] => {
@@ -235,12 +238,12 @@ function format12HourTo24Hour(hour12Str: string, minuteStr: string, period: 'AM'
   if (isNaN(h)) h = 12;
   if (period === 'PM' && h < 12) h += 12;
   if (period === 'AM' && h === 12) h = 0;
-  return `${String(h).padStart(2, '0')}:${(minuteStr || '00').padStart(2, '0')}`;
+  return \`\${String(h).padStart(2, '0')}:\${(minuteStr || '00').padStart(2, '0')}\`;
 }
 
 function formatTo12HourDisplay(time24: string = '09:00'): string {
   const { hour12, minute, period } = parse24HourTo12Hour(time24);
-  return `${hour12}:${minute} ${period}`;
+  return \`\${hour12}:\${minute} \${period}\`;
 }
 
 /** 12-Hour Time Picker with full 60-minute support (00 to 59) */
@@ -278,41 +281,30 @@ function TimePicker12Hour({
           {formatTo12HourDisplay(value24)}
         </span>
       </div>
-      <div className="flex items-center gap-1.5 bg-zinc-950 border border-white/[0.06] rounded-xl p-2 relative z-10">
+      <div className="flex items-center gap-1.5 bg-zinc-950 border border-white/[0.06] rounded-xl p-2">
         <select
           value={hour12}
           onChange={(e) => handleHourChange(e.target.value)}
-          aria-label={`${label} Hour`}
-          className="bg-zinc-900 border border-white/[0.06] rounded-lg px-2.5 py-1 text-xs font-extrabold text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer pointer-events-auto select-none"
+          className="bg-zinc-900 border border-white/[0.04] rounded-lg px-2 py-1 text-xs font-extrabold text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
         >
           {hours.map(h => (
-            <option key={h} value={h} className="bg-zinc-900 text-zinc-100 py-1">{h}</option>
+            <option key={h} value={h}>{h}</option>
           ))}
         </select>
-        <span className="text-xs font-bold text-zinc-500 select-none">:</span>
+        <span className="text-xs font-bold text-zinc-500">:</span>
         <select
           value={minute}
           onChange={(e) => handleMinChange(e.target.value)}
-          aria-label={`${label} Minute`}
-          className="bg-zinc-900 border border-white/[0.06] rounded-lg px-2.5 py-1 text-xs font-extrabold text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer pointer-events-auto select-none"
+          className="bg-zinc-900 border border-white/[0.04] rounded-lg px-2 py-1 text-xs font-extrabold text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
         >
           {minutes.map(m => (
-            <option key={m} value={m} className="bg-zinc-900 text-zinc-100 py-1">{m}</option>
+            <option key={m} value={m}>{m}</option>
           ))}
         </select>
         <button
           type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            handlePeriodChange(period === 'AM' ? 'PM' : 'AM');
-          }}
-          aria-label={`${label} AM/PM toggle`}
-          className={`ml-auto px-2.5 py-1 rounded-lg text-xs font-black uppercase transition-all border cursor-pointer pointer-events-auto select-none ${
-            period === 'AM' 
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' 
-              : 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
-          }`}
+          onClick={() => handlePeriodChange(period === 'AM' ? 'PM' : 'AM')}
+          className={\`ml-auto px-2.5 py-1 rounded-lg text-xs font-black uppercase transition-all border \${period === 'AM' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}\`}
         >
           {period}
         </button>
@@ -321,127 +313,22 @@ function TimePicker12Hour({
   );
 }
 
-/** Live Window Status Card with isolated 1-second clock timer to avoid wizard re-renders */
-interface LiveWindowStatusCardProps {
-  sendWindowStart: string;
-  sendWindowEnd: string;
-  sendWindowTz: string;
-  sendWindowDays: number[];
-  scheduleMode: 'immediate' | 'scheduled';
-  scheduledDate: string;
-  scheduledTime: string;
-}
-
-function LiveWindowStatusCard({
-  sendWindowStart,
-  sendWindowEnd,
-  sendWindowTz,
-  sendWindowDays,
-  scheduleMode,
-  scheduledDate,
-  scheduledTime,
-}: LiveWindowStatusCardProps) {
-  const [liveNow, setLiveNow] = useState<Date>(() => new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setLiveNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const sendingWindowConfig = {
-    sendWindowStart,
-    sendWindowEnd,
-    sendWindowTz: sendWindowTz || 'UTC',
-    sendWindowDays: Array.isArray(sendWindowDays) ? sendWindowDays : [1, 2, 3, 4, 5],
-  };
-
-  const currentWindowTimeParts = getTimePartsInTimezone(liveNow, sendWindowTz || 'UTC');
-  const isCurrentlyInsideWindow = isDateInsideSendWindow(liveNow, sendingWindowConfig);
-
-  const baseLaunchTime = (scheduleMode === 'scheduled' && scheduledDate)
-    ? new Date(`${scheduledDate}T${scheduledTime || '09:00'}:00`)
-    : liveNow;
-
-  const nextEligibleSendDate = calculateNextEligibleSendTime(baseLaunchTime, sendingWindowConfig);
-  const formattedNextEligibleSend = formatDateTimeInTimezone(nextEligibleSendDate, sendWindowTz || 'UTC');
-
-  const isImmediateMode = scheduleMode === 'immediate';
-
-  return (
-    <div className="p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.03] space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-          <Clock className="h-4 w-4" /> Live Window Status & Launch Timing
-        </h4>
-        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase flex items-center gap-1.5 border ${
-          isImmediateMode || isCurrentlyInsideWindow
-            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-            : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-        }`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${isImmediateMode || isCurrentlyInsideWindow ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-          {isImmediateMode ? 'Immediate Launch Mode' : (isCurrentlyInsideWindow ? 'Inside Sending Window' : 'Outside Sending Window')}
-        </span>
-      </div>
-
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-        <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
-          <span className="text-[10px] text-zinc-500 font-bold uppercase block">Current Time</span>
-          <p className="text-sm font-extrabold text-zinc-150 font-mono">
-            {formatTo12HourDisplay(currentWindowTimeParts.timeString24)} ({currentWindowTimeParts.weekdayShort})
-          </p>
-        </div>
-
-        <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
-          <span className="text-[10px] text-zinc-500 font-bold uppercase block">Timezone</span>
-          <p className="text-sm font-extrabold text-zinc-150 truncate">
-            {sendWindowTz}
-          </p>
-        </div>
-
-        <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
-          <span className="text-[10px] text-zinc-500 font-bold uppercase block">Sending Window</span>
-          <p className="text-sm font-extrabold text-zinc-150 font-mono">
-            {formatTo12HourDisplay(sendWindowStart)} - {formatTo12HourDisplay(sendWindowEnd)}
-          </p>
-        </div>
-
-        <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
-          <span className="text-[10px] text-emerald-400 font-bold uppercase block">
-            {isImmediateMode ? 'Launch Timing' : 'Next Eligible Send'}
-          </span>
-          <p className="text-sm font-extrabold text-emerald-400">
-            {isImmediateMode ? 'Immediately (Now)' : formattedNextEligibleSend}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
 /** Client-side variable interpolation for live previews */
 function interpolateVariablesForClient(template: string, vars: Record<string, string>): string {
   if (!template) return '';
   let result = template;
   for (const [k, v] of Object.entries(vars)) {
-    const regex = new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, 'gi');
-    result = result.replace(regex, v || `{{${k}}}`);
+    const regex = new RegExp(\`\\\\{\\\\\\{\\\\s*\${k}\\\\s*\\\\}\\\\}\`, 'gi');
+    result = result.replace(regex, v || \`{{\${k}}}\`);
   }
   return result;
 }
 
-function CampaignWizardContent() {
+export default function NewCampaignWizard() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const editCampaignId = searchParams?.get('edit') || null;
   const supabase = createClient();
   const { signature: globalSig, renderedHtml: globalSigHtml } = useGlobalSignature();
   
-  // Edit mode states
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editingCampaignStatus, setEditingCampaignStatus] = useState<string | null>(null);
-  const [editingCampaignStats, setEditingCampaignStats] = useState<{ sent: number; total: number }>({ sent: 0, total: 0 });
-
   // App-wide hydration state
   const [currentStep, setCurrentStep] = useState<number>(() => {
     if (typeof window === 'undefined') return 1;
@@ -458,6 +345,9 @@ function CampaignWizardContent() {
   });
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [wizardHydrated, setWizardHydrated] = useState(false);
+
+  // Real-time ticking time for Delivery Config UX
+  const [liveNow, setLiveNow] = useState<Date>(() => new Date());
 
   // Data states
   const [leads, setLeads] = useState<CrmLead[]>([]);
@@ -521,6 +411,12 @@ function CampaignWizardContent() {
   const [isCustomUrlInputOpen, setIsCustomUrlInputOpen] = useState(false);
   const [customSheetUrl, setCustomSheetUrl] = useState('');
   const [sheetError, setSheetError] = useState<string | null>(null);
+
+  // Update clock every second
+  useEffect(() => {
+    const timer = setInterval(() => setLiveNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const clearSheetStorageAndState = () => {
     setSheetsConnection(null);
@@ -616,11 +512,11 @@ function CampaignWizardContent() {
         if (data.isNotFound || res.status === 404 || res.status === 403) {
           setSheetError("This spreadsheet is no longer available. Please select another spreadsheet.");
         } else {
-          alert(`Error: ${data.error}`);
+          alert(\`Error: \${data.error}\`);
         }
       }
     } catch (err: any) {
-      alert(`Error connecting sheet: ${err.message}`);
+      alert(\`Error connecting sheet: \${err.message}\`);
     } finally {
       setIsSyncingSheet(false);
     }
@@ -638,7 +534,7 @@ function CampaignWizardContent() {
     const sheetIdToDisconnect = selectedSheetId || currentConn?.sheet_id;
 
     if (!silent) {
-      if (!confirm(`Are you sure you want to disconnect Google Sheet '${currentConn?.sheet_name || sheetIdToDisconnect}'?`)) return;
+      if (!confirm(\`Are you sure you want to disconnect Google Sheet '\${currentConn?.sheet_name || sheetIdToDisconnect}'?\`)) return;
     }
 
     setIsSyncingSheet(true);
@@ -759,7 +655,7 @@ function CampaignWizardContent() {
         }
       }
     } catch (err: any) {
-      alert(`Error connecting sheet: ${err.message}`);
+      alert(\`Error connecting sheet: \${err.message}\`);
     } finally {
       setIsSyncingSheet(false);
     }
@@ -877,14 +773,14 @@ function CampaignWizardContent() {
 
         if (error) throw error;
 
-        alert(`Successfully imported ${inserted?.length || leadsToInsert.length} leads from CSV!`);
+        alert(\`Successfully imported \${inserted?.length || leadsToInsert.length} leads from CSV!\`);
         await fetchLeadsForSource('csv');
         if (inserted && inserted.length > 0) {
           setSelectedLeadIds(inserted.map(i => String(i.id)));
         }
       } catch (err: any) {
         console.error("CSV insert error:", err);
-        alert(`Failed to import leads: ${err.message}`);
+        alert(\`Failed to import leads: \${err.message}\`);
       } finally {
         setIsSyncingSheet(false);
       }
@@ -893,7 +789,7 @@ function CampaignWizardContent() {
   };
 
   const parseCSV = (text: string) => {
-    const lines = text.split(/\r?\n/);
+    const lines = text.split(/\\r?\\n/);
     if (lines.length <= 1) return [];
     
     const parseLine = (line: string) => {
@@ -1031,16 +927,9 @@ function CampaignWizardContent() {
   };
 
   const handleToggleDay = (dayId: number) => {
-    setSendWindowDays(prev => {
-      const numId = Number(dayId);
-      const exists = (prev || []).some(d => Number(d) === numId);
-      if (exists) {
-        if ((prev || []).length <= 1) return prev;
-        return (prev || []).filter(d => Number(d) !== numId).sort((a, b) => a - b);
-      } else {
-        return [...(prev || []), numId].sort((a, b) => a - b);
-      }
-    });
+    setSendWindowDays(prev => 
+      prev.includes(dayId) ? prev.filter(d => d !== dayId) : [...prev, dayId].sort()
+    );
   };
 
   const handleLaunch = async () => {
@@ -1053,7 +942,7 @@ function CampaignWizardContent() {
       let scheduledAtISO: string | null = null;
       if (scheduleMode === 'scheduled' && scheduledDate) {
         const timePart = scheduledTime || getBrowserCurrentTime24();
-        scheduledAtISO = new Date(`${scheduledDate}T${timePart}:00`).toISOString();
+        scheduledAtISO = new Date(\`\${scheduledDate}T\${timePart}:00\`).toISOString();
       }
 
       const payload = {
@@ -1068,7 +957,6 @@ function CampaignWizardContent() {
         followupRules: followupRules,
         leadSourceType: importSource,
         leadSourceId: importSource === 'sheets' ? selectedSheetId : null,
-        scheduleMode,
         scheduledAt: scheduledAtISO,
         sendWindowStart,
         sendWindowEnd,
@@ -1076,45 +964,18 @@ function CampaignWizardContent() {
         sendWindowDays,
       };
 
-      if (isEditMode && editCampaignId) {
-        // Edit Mode: PUT /api/campaigns/[id]
-        const res = await fetch(`/api/campaigns/${editCampaignId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+      const res = await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-        const data = await res.json();
-        if (data.success) {
-          localStorage.removeItem('ctrforge_wizard_state');
-          alert('Campaign updated successfully!');
-          router.push('/campaigns');
-        } else {
-          alert(data.error || 'Failed to update campaign');
-        }
+      const data = await res.json();
+      if (data.success) {
+        localStorage.removeItem('ctrforge_wizard_state');
+        router.push('/campaigns');
       } else {
-        // Create Mode: POST /api/campaigns
-        const res = await fetch('/api/campaigns', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        const data = await res.json();
-        if (data.success) {
-          localStorage.removeItem('ctrforge_wizard_state');
-          if (scheduleMode === 'immediate') {
-            alert('Campaign launched successfully and is running now.');
-          } else if (data.insideWindow === false && data.nextEligibleSend) {
-            alert(`Campaign scheduled! The current time is outside your allowed sending window.\nNext eligible send: ${data.nextEligibleSend}`);
-          } else {
-            alert('Campaign scheduled successfully!');
-          }
-          router.push('/campaigns');
-        } else {
-          alert(data.error || 'Failed to launch campaign');
-        }
-
+        alert(data.error || 'Failed to launch campaign');
       }
     } catch (err) {
       console.error('Launch campaign error:', err);
@@ -1137,8 +998,8 @@ function CampaignWizardContent() {
         const data = await res.json();
         if (data.success && data.templates && data.templates.length > 0) {
           setTemplates(data.templates);
-          // Set default template if not yet set and not in edit mode
-          if (!selectedTemplateId && !editCampaignId) {
+          // Set default template if not yet set
+          if (!selectedTemplateId) {
             setSelectedTemplateId(data.templates[0].id);
             if (!subjectOverride) setSubjectOverride(data.templates[0].subject || '');
             if (!htmlBodyOverride) setHtmlBodyOverride(data.templates[0].html_body || '');
@@ -1156,100 +1017,39 @@ function CampaignWizardContent() {
     fetchConnectedSheets();
     fetchDriveSpreadsheets();
 
-    if (editCampaignId) {
-      // Load campaign for editing
-      const fetchCampaignForEdit = async () => {
-        try {
-          const res = await fetch(`/api/campaigns/${editCampaignId}`);
-          const data = await res.json();
-          if (data.success && data.campaign) {
-            setIsEditMode(true);
-            setEditingCampaignStatus(data.campaign.status || 'draft');
-            setEditingCampaignStats({
-              sent: data.campaign.sent_count || 0,
-              total: data.campaign.total_leads || 0,
-            });
-            setCampaignName(data.campaign.name || '');
-            if (data.campaign.template_id) setSelectedTemplateId(data.campaign.template_id);
-            if (data.campaign.subject_override) setSubjectOverride(data.campaign.subject_override);
-            if (data.campaign.html_body_override) setHtmlBodyOverride(data.campaign.html_body_override);
-            if (data.campaign.send_rate) setSendRate(data.campaign.send_rate);
-            if (data.campaign.random_delay_min) setDelayMinVal(data.campaign.random_delay_min);
-            if (data.campaign.random_delay_max) setDelayMaxVal(data.campaign.random_delay_max);
-            if (data.campaign.send_window_start) setSendWindowStart(data.campaign.send_window_start);
-            if (data.campaign.send_window_end) setSendWindowEnd(data.campaign.send_window_end);
-            if (data.campaign.send_window_tz) setSendWindowTz(data.campaign.send_window_tz);
-            if (data.campaign.send_window_days) setSendWindowDays(data.campaign.send_window_days);
-            if (data.campaign.schedule_mode) {
-              setScheduleMode(data.campaign.schedule_mode);
-            } else if (data.campaign.status === 'scheduled') {
-              setScheduleMode('scheduled');
-            } else {
-              setScheduleMode('immediate');
-            }
-            if (data.campaign.scheduled_at) {
-              const [d, t] = data.campaign.scheduled_at.split('T');
-              if (d) setScheduledDate(d);
-              if (t) setScheduledTime(t.slice(0, 5));
-            }
-            if (data.leads && data.leads.length > 0) {
-              setSelectedLeadIds(data.leads.map((l: any) => String(l.lead_id)));
-            }
-            if (data.followupRules && data.followupRules.length > 0) {
-              setFollowupRules(data.followupRules.map((r: any) => ({
-                delayDays: r.delay_days || r.delayDays || 3,
-                sendTime: r.send_time || r.sendTime || '10:00',
-                sendTimeTz: r.send_time_tz || r.sendTimeTz || data.campaign.send_window_tz || getBrowserTimezone(),
-                ruleType: r.rule_type || r.ruleType || 'not_opened',
-                templateId: r.template_id || r.templateId || '',
-                useAiGeneration: r.use_ai_generation !== false,
-                threadMode: r.thread_mode || r.threadMode || 'reply',
-                subjectOverride: r.subject_override || r.subjectOverride || '',
-                htmlBodyOverride: r.html_body_override || r.htmlBodyOverride || '',
-              })));
-            }
-          }
-        } catch (err) {
-          console.error('Failed to load campaign for editing:', err);
-        }
-      };
-      fetchCampaignForEdit();
-    } else {
-      // New campaign mode: hydrate from localStorage
-      try {
-        const saved = localStorage.getItem('ctrforge_wizard_state');
-        if (saved) {
-          const s = JSON.parse(saved);
-          if (s.campaignName) setCampaignName(s.campaignName);
-          if (s.importSource) setImportSource(s.importSource);
-          if (s.selectedSheetId) setSelectedSheetId(s.selectedSheetId);
-          if (s.selectedTemplateId) setSelectedTemplateId(s.selectedTemplateId);
-          if (s.subjectOverride) setSubjectOverride(s.subjectOverride);
-          if (s.htmlBodyOverride) setHtmlBodyOverride(s.htmlBodyOverride);
-          if (s.followupRules) setFollowupRules(s.followupRules);
-          if (s.sendRate !== undefined) setSendRate(s.sendRate);
-          if (s.delayMinVal !== undefined) setDelayMinVal(s.delayMinVal);
-          if (s.delayMinUnit) setDelayMinUnit(s.delayMinUnit);
-          if (s.delayMaxVal !== undefined) setDelayMaxVal(s.delayMaxVal);
-          if (s.delayMaxUnit) setDelayMaxUnit(s.delayMaxUnit);
-          if (s.scheduleMode) setScheduleMode(s.scheduleMode);
-          if (s.scheduledDate) setScheduledDate(s.scheduledDate);
-          if (s.scheduledTime) setScheduledTime(s.scheduledTime);
-          if (s.scheduledTz) setScheduledTz(s.scheduledTz);
-          if (s.sendWindowStart) setSendWindowStart(s.sendWindowStart);
-          if (s.sendWindowEnd) setSendWindowEnd(s.sendWindowEnd);
-          if (s.sendWindowTz) setSendWindowTz(s.sendWindowTz);
-          if (s.sendWindowDays) setSendWindowDays(s.sendWindowDays);
-        }
-      } catch (e) {
-        console.error('Error hydrating from localStorage:', e);
+    try {
+      const saved = localStorage.getItem('ctrforge_wizard_state');
+      if (saved) {
+        const s = JSON.parse(saved);
+        if (s.campaignName) setCampaignName(s.campaignName);
+        if (s.importSource) setImportSource(s.importSource);
+        if (s.selectedSheetId) setSelectedSheetId(s.selectedSheetId);
+        if (s.selectedTemplateId) setSelectedTemplateId(s.selectedTemplateId);
+        if (s.subjectOverride) setSubjectOverride(s.subjectOverride);
+        if (s.htmlBodyOverride) setHtmlBodyOverride(s.htmlBodyOverride);
+        if (s.followupRules) setFollowupRules(s.followupRules);
+        if (s.sendRate !== undefined) setSendRate(s.sendRate);
+        if (s.delayMinVal !== undefined) setDelayMinVal(s.delayMinVal);
+        if (s.delayMinUnit) setDelayMinUnit(s.delayMinUnit);
+        if (s.delayMaxVal !== undefined) setDelayMaxVal(s.delayMaxVal);
+        if (s.delayMaxUnit) setDelayMaxUnit(s.delayMaxUnit);
+        if (s.scheduleMode) setScheduleMode(s.scheduleMode);
+        if (s.scheduledDate) setScheduledDate(s.scheduledDate);
+        if (s.scheduledTime) setScheduledTime(s.scheduledTime);
+        if (s.scheduledTz) setScheduledTz(s.scheduledTz);
+        if (s.sendWindowStart) setSendWindowStart(s.sendWindowStart);
+        if (s.sendWindowEnd) setSendWindowEnd(s.sendWindowEnd);
+        if (s.sendWindowTz) setSendWindowTz(s.sendWindowTz);
+        if (s.sendWindowDays) setSendWindowDays(s.sendWindowDays);
       }
+    } catch (e) {
+      console.error('Error hydrating from localStorage:', e);
     }
     setWizardHydrated(true);
-  }, [editCampaignId]);
+  }, []);
 
   useEffect(() => {
-    if (!wizardHydrated || isEditMode) return;
+    if (!wizardHydrated) return;
     if (importSource === 'sheets') {
       if (selectedSheetId) {
         const conn = allConnectedSheets.find(s => s.sheet_id === selectedSheetId);
@@ -1261,15 +1061,13 @@ function CampaignWizardContent() {
         setSelectedLeadIds([]);
       }
     } else {
-      if (!isEditMode) {
-        setSelectedLeadIds([]);
-        fetchLeadsForSource(importSource);
-      }
+      setSelectedLeadIds([]);
+      fetchLeadsForSource(importSource);
     }
-  }, [importSource, selectedSheetId, wizardHydrated, isEditMode]);
+  }, [importSource, selectedSheetId, wizardHydrated]);
 
   useEffect(() => {
-    if (!wizardHydrated || isEditMode) return;
+    if (!wizardHydrated) return;
     const state = {
       currentStep,
       campaignName,
@@ -1296,12 +1094,11 @@ function CampaignWizardContent() {
     };
     localStorage.setItem('ctrforge_wizard_state', JSON.stringify(state));
   }, [
-    wizardHydrated, isEditMode, currentStep, campaignName, importSource, selectedSheetId, selectedLeadIds, 
+    wizardHydrated, currentStep, campaignName, importSource, selectedSheetId, selectedLeadIds, 
     selectedTemplateId, subjectOverride, htmlBodyOverride, followupRules, sendRate, 
     delayMinVal, delayMinUnit, delayMaxVal, delayMaxUnit, scheduleMode, scheduledDate, 
     scheduledTime, scheduledTz, sendWindowStart, sendWindowEnd, sendWindowTz, sendWindowDays
   ]);
-
 
   const handleSelectLead = (leadId: string) => {
     const strId = String(leadId);
@@ -1366,27 +1163,30 @@ function CampaignWizardContent() {
     if (scheduleMode !== 'scheduled' || !scheduledDate) return false;
     try {
       const schedTime = scheduledTime || '09:00';
-      const scheduledDateTime = new Date(`${scheduledDate}T${schedTime}:00`);
+      const scheduledDateTime = new Date(\`\${scheduledDate}T\${schedTime}:00\`);
       return scheduledDateTime.getTime() < Date.now();
     } catch {
       return false;
     }
   })();
 
-  // Delivery window config for previews and calculations
+  // Calculate real-time delivery window status and next eligible send
   const sendingWindowConfig = {
     sendWindowStart,
     sendWindowEnd,
-    sendWindowTz: sendWindowTz || 'UTC',
-    sendWindowDays: Array.isArray(sendWindowDays) ? sendWindowDays : [1, 2, 3, 4, 5],
+    sendWindowTz,
+    sendWindowDays,
   };
 
-  const previewBaseLaunchTime = (scheduleMode === 'scheduled' && scheduledDate)
-    ? new Date(`${scheduledDate}T${scheduledTime || '09:00'}:00`)
-    : new Date();
+  const currentWindowTimeParts = getTimePartsInTimezone(liveNow, sendWindowTz);
+  const isCurrentlyInsideWindow = isDateInsideSendWindow(liveNow, sendingWindowConfig);
 
-  const nextEligibleSendDate = calculateNextEligibleSendTime(previewBaseLaunchTime, sendingWindowConfig);
-  const formattedNextEligibleSend = formatDateTimeInTimezone(nextEligibleSendDate, sendWindowTz || 'UTC');
+  const baseLaunchTime = (scheduleMode === 'scheduled' && scheduledDate)
+    ? new Date(\`\${scheduledDate}T\${scheduledTime || '09:00'}:00\`)
+    : liveNow;
+
+  const nextEligibleSendDate = calculateNextEligibleSendTime(baseLaunchTime, sendingWindowConfig);
+  const formattedNextEligibleSend = formatDateTimeInTimezone(nextEligibleSendDate, sendWindowTz);
 
   return (
     <div className="flex min-h-screen flex-col bg-[#09090b] text-[#f4f4f5] antialiased">
@@ -1397,13 +1197,8 @@ function CampaignWizardContent() {
             <span className="text-xs font-bold uppercase tracking-wider">Back to Dashboard</span>
           </Link>
         </div>
-        <div className="text-center font-bold tracking-tight text-xs uppercase text-zinc-400 flex items-center gap-2">
-          <span>Campaign Architect</span>
-          {isEditMode && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
-              Edit Mode
-            </span>
-          )}
+        <div className="text-center font-bold tracking-tight text-xs uppercase text-zinc-500">
+          Campaign Architect
         </div>
       </header>
 
@@ -1428,17 +1223,17 @@ function CampaignWizardContent() {
                       setCurrentStep(s.step);
                     }
                   }}
-                  className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-extrabold transition-all border ${
+                  className={\`h-8 w-8 rounded-full flex items-center justify-center text-xs font-extrabold transition-all border \${
                     isActive
                       ? 'bg-emerald-500 text-zinc-950 border-emerald-400 shadow-md shadow-emerald-500/20'
                       : isCompleted
                       ? 'bg-zinc-900 text-emerald-400 border-emerald-500/40'
                       : 'bg-zinc-950 text-zinc-600 border-white/[0.04]'
-                  }`}
+                  }\`}
                 >
                   {isCompleted ? <CheckCircle2 className="h-4 w-4" /> : s.step}
                 </button>
-                <span className={`text-xs font-bold uppercase tracking-wider hidden sm:inline ${isActive ? 'text-zinc-100' : 'text-zinc-500'}`}>
+                <span className={\`text-xs font-bold uppercase tracking-wider hidden sm:inline \${isActive ? 'text-zinc-100' : 'text-zinc-500'}\`}>
                   {s.label}
                 </span>
               </div>
@@ -1448,28 +1243,6 @@ function CampaignWizardContent() {
       </div>
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-6 py-8">
-        
-        {/* Edit Mode Alert Banner */}
-        {isEditMode && (
-          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200 animate-in fade-in-50">
-            <div className="flex items-center gap-2.5">
-              <PenTool className="h-4 w-4 text-amber-400 shrink-0" />
-              <div>
-                <span className="font-bold">Editing Campaign: </span>
-                <span className="text-white font-extrabold">{campaignName}</span>
-                <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 border border-amber-500/40 text-amber-300">
-                  {editingCampaignStatus || 'Draft'}
-                </span>
-              </div>
-            </div>
-            {editingCampaignStats.sent > 0 && (
-              <span className="text-[11px] text-zinc-400 sm:text-right">
-                {editingCampaignStats.sent} of {editingCampaignStats.total} already sent (historical sends remain immutable)
-              </span>
-            )}
-          </div>
-        )}
-
         
         {/* Step 1: Choose Leads */}
         {currentStep === 1 && (
@@ -1484,11 +1257,11 @@ function CampaignWizardContent() {
               <button
                 type="button"
                 onClick={() => setImportSource('crm')}
-                className={`p-3.5 rounded-2xl border text-left transition-all ${
+                className={\`p-3.5 rounded-2xl border text-left transition-all \${
                   importSource === 'crm'
                     ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
                     : 'bg-zinc-900/10 border-white/[0.04] text-zinc-400 hover:text-zinc-200'
-                }`}
+                }\`}
               >
                 <div className="flex items-center gap-2 font-bold text-xs">
                   <Users className="h-4 w-4" /> CRM Pipeline
@@ -1499,11 +1272,11 @@ function CampaignWizardContent() {
               <button
                 type="button"
                 onClick={() => setImportSource('sheets')}
-                className={`p-3.5 rounded-2xl border text-left transition-all ${
+                className={\`p-3.5 rounded-2xl border text-left transition-all \${
                   importSource === 'sheets'
                     ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
                     : 'bg-zinc-900/10 border-white/[0.04] text-zinc-400 hover:text-zinc-200'
-                }`}
+                }\`}
               >
                 <div className="flex items-center gap-2 font-bold text-xs">
                   <FileSpreadsheet className="h-4 w-4" /> Google Sheets
@@ -1512,11 +1285,11 @@ function CampaignWizardContent() {
               </button>
 
               <label
-                className={`p-3.5 rounded-2xl border text-left cursor-pointer transition-all ${
+                className={\`p-3.5 rounded-2xl border text-left cursor-pointer transition-all \${
                   importSource === 'csv'
                     ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
                     : 'bg-zinc-900/10 border-white/[0.04] text-zinc-400 hover:text-zinc-200'
-                }`}
+                }\`}
               >
                 <input 
                   type="file" 
@@ -1543,7 +1316,7 @@ function CampaignWizardContent() {
                       disabled={isSyncingSheet}
                       className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-lg"
                     >
-                      <RefreshCw className={`h-3 w-3 ${isSyncingSheet ? 'animate-spin' : ''}`} /> Sync Sheet
+                      <RefreshCw className={\`h-3 w-3 \${isSyncingSheet ? 'animate-spin' : ''}\`} /> Sync Sheet
                     </button>
                   )}
                 </div>
@@ -1664,7 +1437,7 @@ function CampaignWizardContent() {
                               <tr 
                                 key={l.id} 
                                 onClick={() => handleSelectLead(l.id)}
-                                className={`cursor-pointer transition-colors hover:bg-white/[0.02] ${isSelected ? 'bg-emerald-500/[0.04]' : ''}`}
+                                className={\`cursor-pointer transition-colors hover:bg-white/[0.02] \${isSelected ? 'bg-emerald-500/[0.04]' : ''}\`}
                               >
                                 <td className="p-3 text-center">
                                   <input 
@@ -1769,13 +1542,13 @@ function CampaignWizardContent() {
                       Email Body Content (HTML / Plain Text)
                     </label>
                     <span className="text-[10px] text-zinc-500 font-mono">
-                      {htmlBodyOverride.length} chars &bull; ~{htmlBodyOverride.split(/\s+/).filter(Boolean).length} words
+                      {htmlBodyOverride.length} chars &bull; ~{htmlBodyOverride.split(/\\s+/).filter(Boolean).length} words
                     </span>
                   </div>
                   <textarea
                     value={htmlBodyOverride}
                     onChange={(e) => setHtmlBodyOverride(e.target.value)}
-                    placeholder="Hi {{first_name}},\n\nI was watching {{video_title}} on {{channel_name}} and..."
+                    placeholder="Hi {{first_name}},\\n\\nI was watching {{video_title}} on {{channel_name}} and..."
                     rows={12}
                     className="w-full bg-zinc-950 border border-white/[0.06] rounded-xl p-4 text-xs font-mono text-zinc-200 focus:outline-none focus:border-emerald-500 leading-relaxed transition-colors"
                   />
@@ -1806,11 +1579,11 @@ function CampaignWizardContent() {
                         key={tag}
                         type="button"
                         onClick={() => {
-                          const toInsert = `{{${tag}}}`;
-                          setHtmlBodyOverride(prev => prev + (prev.endsWith(' ') || prev.endsWith('\n') || !prev ? '' : ' ') + toInsert);
+                          const toInsert = \`{{\${tag}}}\`;
+                          setHtmlBodyOverride(prev => prev + (prev.endsWith(' ') || prev.endsWith('\\n') || !prev ? '' : ' ') + toInsert);
                         }}
                         className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-950 hover:bg-emerald-500/10 hover:text-emerald-400 text-zinc-300 border border-white/[0.06] hover:border-emerald-500/30 transition-all cursor-pointer"
-                        title={`Append {{${tag}}} to body`}
+                        title={\`Append {{\${tag}}} to body\`}
                       >
                         + {label} <span className="text-[10px] text-zinc-500 font-mono">({`{{${tag}}}`})</span>
                       </button>
@@ -2003,7 +1776,7 @@ function CampaignWizardContent() {
                         <textarea 
                           value={rule.htmlBodyOverride || ''}
                           onChange={(e) => handleUpdateFollowup(idx, 'htmlBodyOverride', e.target.value)}
-                          placeholder={selectedRuleTemplate?.html_body || 'Hello {{first_name}},\n\nJust following up on my previous note...'}
+                          placeholder={selectedRuleTemplate?.html_body || 'Hello {{first_name}},\\n\\nJust following up on my previous note...'}
                           rows={5}
                           className="w-full bg-zinc-900 border border-white/[0.06] rounded-xl p-3.5 text-xs font-mono text-zinc-300 focus:outline-none focus:border-emerald-500"
                         />
@@ -2076,11 +1849,11 @@ function CampaignWizardContent() {
                   <button
                     type="button"
                     onClick={() => setPreviewSequenceIndex(0)}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 border ${
+                    className={\`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 border \${
                       previewSequenceIndex === 0
                         ? 'bg-emerald-500 text-zinc-950 border-emerald-400 font-extrabold shadow-md'
                         : 'bg-zinc-950 border-white/[0.04] text-zinc-400 hover:text-white'
-                    }`}
+                    }\`}
                   >
                     Main Email
                   </button>
@@ -2090,11 +1863,11 @@ function CampaignWizardContent() {
                       key={fIdx}
                       type="button"
                       onClick={() => setPreviewSequenceIndex(fIdx + 1)}
-                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 border ${
+                      className={\`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 border \${
                         previewSequenceIndex === fIdx + 1
                           ? 'bg-emerald-500 text-zinc-950 border-emerald-400 font-extrabold shadow-md'
                           : 'bg-zinc-950 border-white/[0.04] text-zinc-400 hover:text-white'
-                      }`}
+                      }\`}
                     >
                       Follow-up #{fIdx + 1}
                     </button>
@@ -2112,7 +1885,7 @@ function CampaignWizardContent() {
               </div>
 
               <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider self-end sm:self-center shrink-0">
-                Viewing: {previewSequenceIndex === 0 ? 'Main Email' : `Follow-up #${previewSequenceIndex}`}
+                Viewing: {previewSequenceIndex === 0 ? 'Main Email' : \`Follow-up #\${previewSequenceIndex}\`}
               </span>
             </div>
 
@@ -2121,7 +1894,7 @@ function CampaignWizardContent() {
               <div className="p-4 bg-zinc-900/40 border-b border-white/[0.04] flex items-center justify-between">
                 <div className="flex flex-col text-xs">
                   <span className="text-zinc-400 font-bold uppercase">
-                    {previewSequenceIndex === 0 ? 'MAIN EMAIL PREVIEW' : `FOLLOW-UP #${previewSequenceIndex} PREVIEW`}
+                    {previewSequenceIndex === 0 ? 'MAIN EMAIL PREVIEW' : \`FOLLOW-UP #\${previewSequenceIndex} PREVIEW\`}
                   </span>
                   <span className="text-zinc-200 font-extrabold">{currentReviewLead?.creator_name} ({getLeadEmail(currentReviewLead) || 'No email'})</span>
                 </div>
@@ -2286,14 +2059,14 @@ function CampaignWizardContent() {
                   <button
                     type="button"
                     onClick={() => setScheduleMode('immediate')}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider border transition-all cursor-pointer ${scheduleMode === 'immediate' ? 'bg-emerald-500 text-zinc-950 border-emerald-400 shadow-md' : 'bg-zinc-950 border-white/[0.06] text-zinc-400 hover:text-zinc-200'}`}
+                    className={\`px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider border transition-all cursor-pointer \${scheduleMode === 'immediate' ? 'bg-emerald-500 text-zinc-950 border-emerald-400 shadow-md' : 'bg-zinc-950 border-white/[0.06] text-zinc-400 hover:text-zinc-200'}\`}
                   >
                     Run Immediately
                   </button>
                   <button
                     type="button"
                     onClick={() => setScheduleMode('scheduled')}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider border transition-all cursor-pointer ${scheduleMode === 'scheduled' ? 'bg-emerald-500 text-zinc-950 border-emerald-400 shadow-md' : 'bg-zinc-950 border-white/[0.06] text-zinc-400 hover:text-zinc-200'}`}
+                    className={\`px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider border transition-all cursor-pointer \${scheduleMode === 'scheduled' ? 'bg-emerald-500 text-zinc-950 border-emerald-400 shadow-md' : 'bg-zinc-950 border-white/[0.06] text-zinc-400 hover:text-zinc-200'}\`}
                   >
                     Schedule Campaign
                   </button>
@@ -2301,18 +2074,16 @@ function CampaignWizardContent() {
 
                 {/* RUN IMMEDIATELY MODE */}
                 {scheduleMode === 'immediate' ? (
-                  <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-2 mt-3 animate-in fade-in-50">
+                  <div className="p-4 rounded-xl bg-zinc-950/60 border border-white/[0.04] space-y-1.5 mt-3 animate-in fade-in-50">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Immediate Launch</span>
+                      <span className="text-xs font-bold text-zinc-200 uppercase tracking-wider">Launch Mode: Immediate</span>
                     </div>
-                    <p className="text-xs text-zinc-300 leading-relaxed">
-                      The campaign will start as soon as you click <strong>{isEditMode ? 'SAVE & UPDATE CAMPAIGN' : 'LAUNCH CAMPAIGN'}</strong>.
-                      The sending window ({sendWindowStart} – {sendWindowEnd} {sendWindowTz}), allowed days, account limits, and safety warmup rules will be respected automatically.
+                    <p className="text-xs text-zinc-400 leading-relaxed">
+                      Campaign becomes active immediately. Emails are sent during the allowed sending window.
                     </p>
                   </div>
                 ) : (
-
                   /* SCHEDULE CAMPAIGN MODE */
                   <div className="space-y-3 pt-3 animate-in fade-in-50">
                     <div className="grid md:grid-cols-3 gap-4">
@@ -2442,11 +2213,10 @@ function CampaignWizardContent() {
                     <select
                       value={sendWindowTz}
                       onChange={(e) => setSendWindowTz(e.target.value)}
-                      aria-label="Sending window timezone"
-                      className="w-full bg-zinc-950 border border-white/[0.06] rounded-xl px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer relative z-10 pointer-events-auto"
+                      className="w-full bg-zinc-950 border border-white/[0.06] rounded-xl px-3 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
                     >
                       {TIMEZONES.map(tz => (
-                        <option key={tz} value={tz} className="bg-zinc-900 text-zinc-100 py-1">{tz}</option>
+                        <option key={tz} value={tz}>{tz}</option>
                       ))}
                     </select>
                   </div>
@@ -2454,24 +2224,15 @@ function CampaignWizardContent() {
 
                 <div className="space-y-1 pt-2">
                   <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Allowed Days of Week</label>
-                  <div className="flex flex-wrap gap-2 pt-0.5">
+                  <div className="flex flex-wrap gap-2">
                     {DAYS_OF_WEEK.map(d => {
-                      const isSelected = (sendWindowDays || []).some(day => Number(day) === Number(d.id));
+                      const isSelected = sendWindowDays.includes(d.id);
                       return (
                         <button
                           key={d.id}
                           type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleToggleDay(d.id);
-                          }}
-                          aria-label={`Toggle ${d.label}`}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer select-none pointer-events-auto ${
-                            isSelected 
-                              ? 'bg-emerald-500 text-zinc-950 font-black shadow-sm' 
-                              : 'bg-zinc-950 text-zinc-400 border border-white/[0.04] hover:text-zinc-200 hover:border-white/[0.1]'
-                          }`}
+                          onClick={() => handleToggleDay(d.id)}
+                          className={\`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-all cursor-pointer \${isSelected ? 'bg-emerald-500 text-zinc-950 font-black' : 'bg-zinc-950 text-zinc-400 border border-white/[0.04]'}\`}
                         >
                           {d.label}
                         </button>
@@ -2482,15 +2243,51 @@ function CampaignWizardContent() {
               </div>
 
               {/* Bug 5: Real-time Current Time / Window UX Card */}
-              <LiveWindowStatusCard
-                sendWindowStart={sendWindowStart}
-                sendWindowEnd={sendWindowEnd}
-                sendWindowTz={sendWindowTz}
-                sendWindowDays={sendWindowDays}
-                scheduleMode={scheduleMode}
-                scheduledDate={scheduledDate}
-                scheduledTime={scheduledTime}
-              />
+              <div className="p-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.03] space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                    <Clock className="h-4 w-4" /> Live Window Status & Next Eligible Send
+                  </h4>
+                  <span className={\`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase flex items-center gap-1.5 border \${
+                    isCurrentlyInsideWindow
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                      : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  }\`}>
+                    <span className={\`h-1.5 w-1.5 rounded-full \${isCurrentlyInsideWindow ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}\`} />
+                    {isCurrentlyInsideWindow ? 'Inside Sending Window' : 'Outside Sending Window'}
+                  </span>
+                </div>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
+                    <span className="text-[10px] text-zinc-500 font-bold uppercase block">Current Time</span>
+                    <p className="text-sm font-extrabold text-zinc-150 font-mono">
+                      {formatTo12HourDisplay(currentWindowTimeParts.timeString24)} ({currentWindowTimeParts.weekdayShort})
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
+                    <span className="text-[10px] text-zinc-500 font-bold uppercase block">Timezone</span>
+                    <p className="text-sm font-extrabold text-zinc-150 truncate">
+                      {sendWindowTz}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
+                    <span className="text-[10px] text-zinc-500 font-bold uppercase block">Sending Window</span>
+                    <p className="text-sm font-extrabold text-zinc-150 font-mono">
+                      {formatTo12HourDisplay(sendWindowStart)} - {formatTo12HourDisplay(sendWindowEnd)}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/60 rounded-xl border border-white/[0.04] space-y-0.5">
+                    <span className="text-[10px] text-emerald-400 font-bold uppercase block">Next Eligible Send</span>
+                    <p className="text-sm font-extrabold text-emerald-400">
+                      {formattedNextEligibleSend}
+                    </p>
+                  </div>
+                </div>
+              </div>
 
               {/* Campaign Pre-Launch Summary Panel */}
               <div className="border border-white/[0.06] bg-zinc-950/60 p-5 rounded-2xl space-y-4">
@@ -2516,7 +2313,7 @@ function CampaignWizardContent() {
                     <p className="text-sm font-extrabold text-zinc-150">
                       {scheduleMode === 'immediate' 
                         ? 'Run Immediately (Starts: Now)' 
-                        : `${scheduledDate || 'Date TBD'} at ${formatTo12HourDisplay(scheduledTime)} (${scheduledTz})`}
+                        : \`\${scheduledDate || 'Date TBD'} at \${formatTo12HourDisplay(scheduledTime)} (\${scheduledTz})\`}
                     </p>
                   </div>
 
@@ -2537,7 +2334,7 @@ function CampaignWizardContent() {
                   <div className="p-3 bg-zinc-900/40 rounded-xl border border-white/[0.04] space-y-1">
                     <span className="text-[10px] text-zinc-500 font-bold uppercase block">Estimated Completion</span>
                     <p className="text-sm font-extrabold text-zinc-150">
-                      {leadsWithEmailCount > 0 ? `~${(leadsWithEmailCount / sendRate).toFixed(1)} hours` : 'N/A'}
+                      {leadsWithEmailCount > 0 ? \`~\${(leadsWithEmailCount / sendRate).toFixed(1)} hours\` : 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -2573,55 +2370,28 @@ function CampaignWizardContent() {
               Next <ArrowRight className="h-4 w-4 ml-1.5" />
             </button>
           ) : (
-            isEditMode ? (
-              <button
-                disabled={launching || leadsWithEmailCount === 0 || (scheduleMode === 'scheduled' && isScheduledInPast)}
-                onClick={handleLaunch}
-                className="h-9 px-6 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-amber-850 disabled:opacity-40 text-zinc-950 text-xs font-extrabold uppercase tracking-wider transition-all flex items-center shadow-lg shadow-amber-500/10 cursor-pointer"
-              >
-                {launching ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Saving Changes...
-                  </>
-                ) : (
-                  <>
-                    <Check className="h-4 w-4 mr-2 stroke-[3px]" /> Save & Update Campaign
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                disabled={launching || leadsWithEmailCount === 0 || (scheduleMode === 'scheduled' && isScheduledInPast)}
-                onClick={handleLaunch}
-                className="h-9 px-6 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-850 disabled:opacity-40 text-zinc-950 text-xs font-extrabold uppercase tracking-wider transition-all flex items-center shadow-lg shadow-emerald-500/10 cursor-pointer"
-              >
-                {launching ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Launching...
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4 mr-2" /> Launch Campaign
-                  </>
-                )}
-              </button>
-            )
+            <button
+              disabled={launching || leadsWithEmailCount === 0 || (scheduleMode === 'scheduled' && isScheduledInPast)}
+              onClick={handleLaunch}
+              className="h-9 px-6 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-850 disabled:opacity-40 text-zinc-950 text-xs font-extrabold uppercase tracking-wider transition-all flex items-center shadow-lg shadow-emerald-500/10"
+            >
+              {launching ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Launching...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" /> Launch Campaign
+                </>
+              )}
+            </button>
           )}
         </div>
       </main>
     </div>
   );
 }
+`;
 
-export default function NewCampaignWizard() {
-  return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-[#09090b] text-zinc-400 text-xs font-bold uppercase tracking-wider">
-        <RefreshCw className="h-5 w-5 animate-spin text-emerald-400 mr-2" /> Loading Campaign Architect...
-      </div>
-    }>
-      <CampaignWizardContent />
-    </Suspense>
-  );
-}
-
+fs.writeFileSync(path.join(__dirname, '..', 'src', 'app', 'campaigns', 'new', 'page.tsx'), content, 'utf8');
+console.log('Successfully updated src/app/campaigns/new/page.tsx');

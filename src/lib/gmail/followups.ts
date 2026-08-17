@@ -1,31 +1,36 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { sendEmail, interpolateVariables, injectTrackingPixel, rewriteLinksForTracking, htmlToPlainText } from './sender';
 import { GmailLabelService } from './label-service';
 import { appendSignatureToEmail, normalizeSignatureFromDb } from '../email/signature';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const MAX_FOLLOWUPS = 3;
+const MAX_FOLLOWUPS = 5;
 
 /**
  * Evaluate follow-up rules and find due follow-ups
  */
-export async function evaluateFollowUpRules(userId: string): Promise<{
+export async function evaluateFollowUpRules(userId: string, passedSupabase?: any): Promise<{
   dueFollowUps: any[];
   cancelledCount: number;
 }> {
-  const supabase = await createClient();
+  const supabase = passedSupabase || createAdminClient();
 
   const now = new Date();
   let cancelledCount = 0;
 
   // Get all pending follow-ups that are due
-  const { data: pendingFollowUps } = await supabase
+  const { data: pendingFollowUps, error } = await supabase
     .from('followup_sequences')
     .select('*, email_campaigns(*)')
     .eq('user_id', userId)
     .eq('status', 'pending')
     .lte('scheduled_at', now.toISOString())
     .order('scheduled_at', { ascending: true });
+
+  if (error) {
+    console.error(`[FollowUps] Error querying pending follow-ups for user ${userId}:`, error);
+    return { dueFollowUps: [], cancelledCount: 0 };
+  }
 
   if (!pendingFollowUps || pendingFollowUps.length === 0) {
     return { dueFollowUps: [], cancelledCount: 0 };
@@ -37,13 +42,14 @@ export async function evaluateFollowUpRules(userId: string): Promise<{
     const campaign = followup.email_campaigns;
     if (!campaign) continue;
 
-    // Rule D: Replied → stop all automation
-    if (campaign.status === 'replied') {
+    // Rule: If recipient replied or bounced or unsubscribed → cancel followups
+    if (campaign.status === 'replied' || campaign.status === 'bounced') {
       await supabase
         .from('followup_sequences')
         .update({ status: 'cancelled' })
         .eq('id', followup.id);
       cancelledCount++;
+      console.log(`[FollowUps] Cancelled follow-up ${followup.id} because lead status is ${campaign.status}`);
       continue;
     }
 
@@ -61,29 +67,34 @@ export async function evaluateFollowUpRules(userId: string): Promise<{
 
     switch (followup.rule_type) {
       case 'not_opened':
-        // Rule A: Sent but not opened → send after 3 days
-        shouldSend = campaign.status === 'sent' && campaign.total_opens === 0;
+        // Rule A: Sent but not opened
+        shouldSend = campaign.status === 'sent' && (campaign.total_opens === 0 || !campaign.opened_at);
         break;
 
       case 'opened_not_clicked':
-        // Rule B: Opened but not clicked → send after 4 days
-        shouldSend = campaign.status === 'opened' && campaign.total_clicks === 0;
+        // Rule B: Opened but not clicked
+        shouldSend = (campaign.status === 'opened' || (campaign.total_opens > 0)) && (campaign.total_clicks === 0 || !campaign.clicked_at);
         break;
 
       case 'clicked_not_replied':
-        // Rule C: Clicked but not replied → send after 5 days
-        shouldSend = campaign.status === 'clicked';
+        // Rule C: Clicked but not replied
+        shouldSend = (campaign.status === 'clicked' || (campaign.total_clicks > 0)) && (campaign.status !== 'replied' && !campaign.replied_at);
+        break;
+
+      default:
+        shouldSend = campaign.status !== 'replied';
         break;
     }
 
     if (shouldSend) {
       dueFollowUps.push(followup);
     } else {
-      // Condition no longer applies (e.g., they opened so 'not_opened' rule is skipped)
+      // Condition no longer applies (e.g. they opened so 'not_opened' rule is skipped)
       await supabase
         .from('followup_sequences')
         .update({ status: 'skipped' })
         .eq('id', followup.id);
+      console.log(`[FollowUps] Skipped follow-up ${followup.id} because condition '${followup.rule_type}' no longer applies.`);
     }
   }
 
@@ -133,6 +144,8 @@ Return a JSON object with:
 }`;
 
   try {
+    if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
@@ -162,7 +175,7 @@ Return a JSON object with:
       htmlBody: parsed.htmlBody || `<p>Hi ${params.creatorName},</p><p>Just following up on my previous email about optimizing your YouTube thumbnails and titles. Would love to hear your thoughts!</p><p>Best,<br/>CTRForge Team</p>`,
     };
   } catch (err) {
-    console.error('AI follow-up generation error:', err);
+    console.error('[FollowUps] AI follow-up generation error:', err);
     // Fallback template
     const fallbacks: Record<string, string> = {
       not_opened: `<p>Hi ${params.creatorName},</p><p>I wanted to make sure my previous email didn't get buried. I spotted some opportunities to boost your click-through rates that I'd love to share.</p><p>Would a quick look at two thumbnail concepts be useful?</p><p>Best,<br/>CTRForge Team</p>`,
@@ -180,23 +193,37 @@ Return a JSON object with:
 /**
  * Execute all due follow-ups for a user
  */
-export async function executeScheduledFollowUps(userId: string): Promise<{
+export async function executeScheduledFollowUps(userId: string, passedSupabase?: any): Promise<{
   sent: number;
   errors: string[];
 }> {
-  const supabase = await createClient();
+  const supabase = passedSupabase || createAdminClient();
 
-  const { dueFollowUps } = await evaluateFollowUpRules(userId);
+  const { dueFollowUps } = await evaluateFollowUpRules(userId, supabase);
   let sent = 0;
   const errors: string[] = [];
 
   for (const followup of dueFollowUps) {
     const campaign = followup.email_campaigns;
+    if (!campaign) continue;
 
     try {
-      // Generate AI follow-up content
+      // 1. ATOMIC LOCK: Claim follow-up item
+      const { data: claimed, error: claimErr } = await supabase
+        .from('followup_sequences')
+        .update({ status: 'sending' })
+        .eq('id', followup.id)
+        .eq('status', 'pending')
+        .select();
+
+      if (claimErr || !claimed || claimed.length === 0) {
+        console.log(`[FollowUps] Sequence ${followup.id} already claimed. Skipping.`);
+        continue;
+      }
+
+      // Generate follow-up content
       const content = await generateFollowUpContent({
-        creatorName: campaign.to_email.split('@')[0], // Fallback name
+        creatorName: campaign.to_email.split('@')[0],
         previousSubject: campaign.subject,
         previousBody: campaign.html_body,
         ruleType: followup.rule_type,
@@ -224,6 +251,8 @@ export async function executeScheduledFollowUps(userId: string): Promise<{
         trackedHtml = appended.html;
       }
 
+      console.log(`[FollowUps] Sending follow-up #${followup.followup_number} to ${campaign.to_email}`);
+
       // Send the follow-up
       const result = await sendEmail({
         userId,
@@ -231,11 +260,13 @@ export async function executeScheduledFollowUps(userId: string): Promise<{
         subject: content.subject,
         htmlBody: trackedHtml,
         textBody: htmlToPlainText(content.htmlBody),
-        threadId: campaign.gmail_thread_id, // Continue in same thread
+        threadId: campaign.gmail_thread_id,
         parentGmailMessageId: campaign.gmail_message_id,
       });
 
-      // Apply Gmail labels to follow-up message & thread
+      console.log(`[FollowUps] Follow-up sent to ${campaign.to_email}. MessageId: ${result.messageId}`);
+
+      // Apply Gmail labels
       try {
         const campaignName = followup.email_campaigns?.bulk_campaigns?.name || 'Outreach';
         const labelIds = await GmailLabelService.ensureCampaignLabels(userId, campaignName);
@@ -248,7 +279,7 @@ export async function executeScheduledFollowUps(userId: string): Promise<{
           }
         }
       } catch (labelErr) {
-        console.error('Follow-up labeling error (non-blocking):', labelErr);
+        console.error('[FollowUps] Gmail labeling error (non-blocking):', labelErr);
       }
 
       // Create campaign record for the follow-up
@@ -280,8 +311,15 @@ export async function executeScheduledFollowUps(userId: string): Promise<{
 
       sent++;
     } catch (err: any) {
-      console.error(`Follow-up error for sequence ${followup.id}:`, err);
+      console.error(`[FollowUps] Follow-up error for sequence ${followup.id}:`, err);
       errors.push(`Follow-up ${followup.id}: ${err.message}`);
+
+      await supabase
+        .from('followup_sequences')
+        .update({
+          status: 'pending', // Revert to pending on temporary failure
+        })
+        .eq('id', followup.id);
     }
   }
 

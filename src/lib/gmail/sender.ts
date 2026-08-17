@@ -97,6 +97,13 @@ export function injectTrackingPixel(html: string, campaignId: string): string {
  */
 export function rewriteLinksForTracking(html: string, campaignId: string): string {
   const baseUrl = getPublicAppBaseUrl();
+
+  // If running in development without a public URL (localhost), do not rewrite external links
+  // to localhost so recipient devices (e.g. mobile) don't get broken connection errors.
+  if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+    return html;
+  }
+
   const encodedCampaignId = Buffer.from(campaignId).toString('base64url');
   
   // Match href attributes in anchor tags

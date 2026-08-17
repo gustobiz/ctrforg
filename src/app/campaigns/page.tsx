@@ -21,7 +21,7 @@ import NotificationCenter from "@/components/campaign-intelligence/notification-
 interface Campaign {
   id: string;
   name: string;
-  status: 'draft' | 'running' | 'paused' | 'completed' | 'cancelled';
+  status: 'draft' | 'scheduled' | 'running' | 'paused' | 'completed' | 'cancelled' | 'failed';
   send_rate: number;
   total_leads: number;
   sent_count: number;

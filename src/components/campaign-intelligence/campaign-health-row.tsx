@@ -3,8 +3,10 @@
 import React, { useState } from 'react';
 import { 
   ChevronDown, ChevronUp, Activity, Inbox, Mail, MousePointer, 
-  MessageSquare, Star, Clock, AlertTriangle, CheckCircle, Archive, ExternalLink
+  MessageSquare, Star, Clock, AlertTriangle, CheckCircle, Archive, ExternalLink,
+  Play, PauseCircle
 } from 'lucide-react';
+
 import { useRouter } from 'next/navigation';
 import { CampaignInsightInfo } from '@/hooks/use-campaign-intelligence';
 import CampaignQuickActions from './campaign-quick-actions';
@@ -53,12 +55,16 @@ export default function CampaignHealthRow({ campaign, insightInfo, onAction, onD
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case 'running': return 'text-emerald-400 border-emerald-500/20 bg-emerald-500/10';
+      case 'queued': return 'text-cyan-400 border-cyan-500/20 bg-cyan-500/10';
+      case 'scheduled': return 'text-purple-400 border-purple-500/20 bg-purple-500/10';
       case 'paused': return 'text-amber-400 border-amber-500/20 bg-amber-500/10';
       case 'completed': return 'text-blue-400 border-blue-500/20 bg-blue-500/10';
+      case 'failed': return 'text-rose-400 border-rose-500/20 bg-rose-500/10';
       case 'cancelled': return 'text-zinc-500 border-zinc-500/20 bg-zinc-500/10';
       default: return 'text-zinc-400 border-zinc-700 bg-zinc-800/50';
     }
   };
+
 
   const handleDeleteCampaign = (id: string) => {
     if (onDelete) onDelete(id);
@@ -117,10 +123,45 @@ export default function CampaignHealthRow({ campaign, insightInfo, onAction, onD
           </div>
 
           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            {/* Run / Pause Control Button */}
+            {campaign.status === 'running' && (
+              <button
+                type="button"
+                onClick={() => onAction?.(campaign.id, 'pause')}
+                className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-[11px] font-bold text-amber-400 hover:text-amber-300 transition-all flex items-center gap-1 cursor-pointer"
+                title="Pause Campaign"
+              >
+                <PauseCircle className="h-3 w-3" /> Pause
+              </button>
+            )}
+
+            {campaign.status === 'paused' && (
+              <button
+                type="button"
+                onClick={() => onAction?.(campaign.id, 'resume')}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all flex items-center gap-1 cursor-pointer"
+                title="Resume Campaign"
+              >
+                <Play className="h-3 w-3 fill-emerald-400" /> Resume
+              </button>
+            )}
+
+            {(campaign.status === 'draft' || campaign.status === 'queued') && (
+              <button
+                type="button"
+                onClick={() => onAction?.(campaign.id, campaign.status === 'draft' ? 'start' : 'resume')}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition-all flex items-center gap-1 cursor-pointer"
+                title="Run Campaign"
+              >
+                <Play className="h-3 w-3 fill-emerald-400" /> Run
+              </button>
+            )}
+
+
             <button
               type="button"
               onClick={() => router.push('/inbox')}
-              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/[0.06] text-[11px] font-bold text-zinc-300 hover:text-white transition-all flex items-center gap-1"
+              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-white/[0.06] text-[11px] font-bold text-zinc-300 hover:text-white transition-all flex items-center gap-1 cursor-pointer"
             >
               <Inbox className="h-3 w-3 text-emerald-400" /> Inbox
             </button>
@@ -134,6 +175,7 @@ export default function CampaignHealthRow({ campaign, insightInfo, onAction, onD
           </div>
         </div>
       </div>
+
 
       {/* Expanded Details Panel */}
       {expanded && (

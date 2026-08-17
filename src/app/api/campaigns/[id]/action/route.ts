@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { getCampaignSettings, saveCampaignSettings } from '@/lib/campaigns/settings';
+import { isInsideSendWindow, processNextBatch } from '@/lib/gmail/campaign-engine';
+import { calculateNextEligibleSendTime } from '@/lib/gmail/schedule-utils';
 
 // POST /api/campaigns/[id]/action — Campaign actions
 export async function POST(
@@ -8,6 +11,8 @@ export async function POST(
 ) {
   try {
     const supabase = await createClient();
+    const adminSupabase = createAdminClient();
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -28,29 +33,40 @@ export async function POST(
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 });
     }
 
+    const settings = await getCampaignSettings(params.id);
+
     switch (action) {
-      case 'start': {
-        if (campaign.status !== 'draft' && campaign.status !== 'paused') {
+      case 'start':
+      case 'resume': {
+        if (campaign.status === 'completed' || campaign.status === 'cancelled') {
           return NextResponse.json({ error: `Cannot start campaign with status "${campaign.status}"` }, { status: 400 });
         }
 
-        // Create queue entries for all pending leads in the campaign if they don't exist
-        const { data: campaignLeads } = await supabase
+        const nowIso = new Date().toISOString();
+
+        // 1. Resume any paused or queued entries in the queue, resetting scheduled_at to NOW for immediate processing
+        await adminSupabase
+          .from('email_queue')
+          .update({ status: 'queued', scheduled_at: nowIso })
+          .eq('campaign_id', params.id)
+          .in('status', ['paused', 'queued']);
+
+        // 2. Create queue entries for any pending leads that don't have queue records
+        const { data: pendingLeads } = await supabase
           .from('campaign_leads')
           .select('lead_id, lead_email')
           .eq('campaign_id', params.id)
           .eq('status', 'pending');
 
-        if (campaignLeads && campaignLeads.length > 0) {
-          // Fetch existing queue items for this campaign to avoid duplicates
-          const { data: existingQueue } = await supabase
+        if (pendingLeads && pendingLeads.length > 0) {
+          const { data: existingQueue } = await adminSupabase
             .from('email_queue')
             .select('lead_id')
             .eq('campaign_id', params.id);
 
           const existingLeadIds = new Set(existingQueue?.map((q: any) => q.lead_id) || []);
 
-          const newQueueItems = campaignLeads
+          const newQueueItems = pendingLeads
             .filter((l: any) => l.lead_email && !existingLeadIds.has(l.lead_id))
             .map((l: any) => ({
               user_id: user.id,
@@ -58,46 +74,51 @@ export async function POST(
               lead_id: l.lead_id,
               email: l.lead_email,
               status: 'queued',
-              scheduled_at: new Date().toISOString(),
+              scheduled_at: nowIso,
             }));
 
           if (newQueueItems.length > 0) {
-            const { error: queueInsertError } = await supabase
-              .from('email_queue')
-              .insert(newQueueItems);
-            
-            if (queueInsertError) throw queueInsertError;
+            await adminSupabase.from('email_queue').insert(newQueueItems);
           }
         }
-
-        // Also resume any paused entries
-        await supabase
-          .from('email_queue')
-          .update({ status: 'queued' })
-          .eq('campaign_id', params.id)
-          .eq('status', 'paused');
 
         const { error } = await supabase
           .from('bulk_campaigns')
           .update({
             status: 'running',
-            started_at: campaign.started_at || new Date().toISOString(),
+            started_at: campaign.started_at || nowIso,
             paused_at: null,
-            updated_at: new Date().toISOString(),
+            updated_at: nowIso,
           })
           .eq('id', params.id);
 
         if (error) throw error;
-        return NextResponse.json({ success: true, status: 'running' });
+
+        // Immediately execute a batch for the manually started/resumed campaign
+        let batchResult = null;
+        try {
+          batchResult = await processNextBatch(params.id, user.id, adminSupabase, { bypassWindow: true });
+          console.log(`[CampaignAction] Manual run/resume result for campaign ${params.id}:`, batchResult);
+        } catch (e: any) {
+          console.error('[CampaignAction] Immediate batch error on resume/start:', e);
+        }
+
+
+        return NextResponse.json({
+          success: true,
+          status: 'running',
+          batchResult,
+        });
       }
 
+
       case 'pause': {
-        if (campaign.status !== 'running') {
-          return NextResponse.json({ error: 'Can only pause running campaigns' }, { status: 400 });
+        if (campaign.status !== 'running' && campaign.status !== 'queued') {
+          return NextResponse.json({ error: 'Can only pause running or queued campaigns' }, { status: 400 });
         }
 
         // Pause all queued entries in the queue
-        await supabase
+        await adminSupabase
           .from('email_queue')
           .update({ status: 'paused' })
           .eq('campaign_id', params.id)
@@ -116,38 +137,13 @@ export async function POST(
         return NextResponse.json({ success: true, status: 'paused' });
       }
 
-      case 'resume': {
-        if (campaign.status !== 'paused') {
-          return NextResponse.json({ error: 'Can only resume paused campaigns' }, { status: 400 });
-        }
-
-        // Set all paused queue entries back to queued
-        await supabase
-          .from('email_queue')
-          .update({ status: 'queued' })
-          .eq('campaign_id', params.id)
-          .eq('status', 'paused');
-
-        const { error } = await supabase
-          .from('bulk_campaigns')
-          .update({
-            status: 'running',
-            paused_at: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', params.id);
-
-        if (error) throw error;
-        return NextResponse.json({ success: true, status: 'running' });
-      }
-
       case 'stop': {
-        if (campaign.status !== 'running' && campaign.status !== 'paused') {
-          return NextResponse.json({ error: 'Can only stop running or paused campaigns' }, { status: 400 });
+        if (campaign.status !== 'running' && campaign.status !== 'paused' && campaign.status !== 'queued') {
+          return NextResponse.json({ error: 'Can only stop active or paused campaigns' }, { status: 400 });
         }
 
         // Set queue items to failed / campaign stopped
-        await supabase
+        await adminSupabase
           .from('email_queue')
           .update({ status: 'failed', error: 'Campaign stopped by user' })
           .eq('campaign_id', params.id)
@@ -164,7 +160,7 @@ export async function POST(
         if (error) throw error;
 
         // Cancel pending leads
-        await supabase
+        await adminSupabase
           .from('campaign_leads')
           .update({ status: 'skipped' })
           .eq('campaign_id', params.id)
@@ -193,6 +189,9 @@ export async function POST(
           .single();
 
         if (cloneError) throw cloneError;
+
+        // Clone settings
+        await saveCampaignSettings(newCampaign.id, settings, user.id);
 
         // Clone leads
         const { data: existingLeads } = await supabase

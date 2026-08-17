@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 
 // ============================================================
 // Google OAuth 2.0 Configuration for Gmail Integration
@@ -123,18 +123,41 @@ export async function getGmailUserEmail(accessToken: string): Promise<string> {
  * Get a valid access token for a user, refreshing if expired
  */
 export async function getValidAccessToken(userId: string): Promise<{ accessToken: string; email: string } | null> {
-  const supabase = await createClient();
+  let supabase: any;
+  try {
+    supabase = await createClient();
+  } catch {
+    supabase = createAdminClient();
+  }
 
-  const { data: connection, error } = await supabase
+  let { data: connection, error } = await supabase
     .from('gmail_connections')
     .select('*')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
+
+  // If not found with user-scoped client, try admin client (e.g. for background cron execution)
+  if (!connection) {
+    const adminClient = createAdminClient();
+    const { data: adminConn, error: adminErr } = await adminClient
+      .from('gmail_connections')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    
+    if (adminConn) {
+      connection = adminConn;
+      supabase = adminClient;
+    } else if (adminErr) {
+      error = adminErr;
+    }
+  }
 
   if (error || !connection) {
     console.error('Failed to fetch gmail_connections:', error?.message || 'No connection found for user', userId);
     return null;
   }
+
 
   // Check if all required scopes are present in the connection
   const requiredScopes = [

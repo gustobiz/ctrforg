@@ -48,23 +48,34 @@ export default function CampaignQuickActions({ campaign, onAction, onDelete }: P
 
       {open && (
         <div className="absolute right-0 mt-1.5 w-48 rounded-xl border border-white/[0.08] bg-zinc-950 p-1 shadow-2xl z-50 animate-in fade-in-80 duration-150 space-y-0.5">
-          {/* ▶ Run / Resume Campaign */}
-          {(campaign.status === 'draft' || campaign.status === 'paused') && (
+          {/* ⏸ Pause / ▶ Run / Resume Campaign */}
+          {campaign.status === 'paused' && (
             <button
               type="button"
-              onClick={() => { setOpen(false); onAction?.(campaign.id, campaign.status === 'draft' ? 'start' : 'resume'); }}
-              className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+              onClick={() => { setOpen(false); onAction?.(campaign.id, 'resume'); }}
+              className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
+            >
+              <Play className="mr-2 h-3.5 w-3.5 fill-emerald-400" /> ▶ Resume Campaign
+            </button>
+          )}
+
+          {(campaign.status === 'draft' || campaign.status === 'queued') && (
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onAction?.(campaign.id, 'start'); }}
+              className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
             >
               <Play className="mr-2 h-3.5 w-3.5 fill-emerald-400" /> ▶ Run Campaign
             </button>
           )}
 
-          {/* ⏸ Pause Campaign */}
+
+
           {campaign.status === 'running' && (
             <button
               type="button"
               onClick={() => { setOpen(false); onAction?.(campaign.id, 'pause'); }}
-              className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-colors"
+              className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer"
             >
               <PauseCircle className="mr-2 h-3.5 w-3.5" /> ⏸ Pause Campaign
             </button>
@@ -72,26 +83,38 @@ export default function CampaignQuickActions({ campaign, onAction, onDelete }: P
 
           <div className="h-px bg-white/[0.04] my-1" />
 
+          {/* 📬 View Inbox */}
           <button
             type="button"
             onClick={() => { setOpen(false); router.push('/inbox'); }}
-            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors"
+            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors cursor-pointer"
           >
             <Inbox className="mr-2 h-3.5 w-3.5 text-emerald-400" /> View Inbox
           </button>
 
+          {/* ✏️ Edit Campaign (Placed directly below View Inbox) */}
+          <button
+            type="button"
+            onClick={() => { setOpen(false); router.push(`/campaigns/new?edit=${campaign.id}`); }}
+            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors cursor-pointer"
+          >
+            <MessageSquare className="mr-2 h-3.5 w-3.5 text-amber-400" /> Edit Campaign
+          </button>
+
+          {/* 👥 View CRM */}
           <button
             type="button"
             onClick={() => { setOpen(false); router.push('/crm'); }}
-            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors"
+            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors cursor-pointer"
           >
             <Users className="mr-2 h-3.5 w-3.5 text-blue-400" /> View CRM
           </button>
 
+          {/* 📄 Duplicate */}
           <button
             type="button"
             onClick={() => { setOpen(false); onAction?.(campaign.id, 'duplicate'); }}
-            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors"
+            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-900 hover:text-white transition-colors cursor-pointer"
           >
             <Copy className="mr-2 h-3.5 w-3.5 text-zinc-500" /> Duplicate
           </button>
@@ -102,7 +125,7 @@ export default function CampaignQuickActions({ campaign, onAction, onDelete }: P
           <button
             type="button"
             onClick={handleDeleteClick}
-            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-colors"
+            className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
           >
             <Trash2 className="mr-2 h-3.5 w-3.5 text-rose-500" /> 🗑 Delete Campaign
           </button>
@@ -111,3 +134,4 @@ export default function CampaignQuickActions({ campaign, onAction, onDelete }: P
     </div>
   );
 }
+
