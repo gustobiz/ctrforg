@@ -175,8 +175,98 @@ function calculateEstimatedMetrics(
   };
 }
 
+// helper: format timestamp from seconds
+function formatTimestamp(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const hrs = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hrs > 0) {
+    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+export interface TranscriptSegment {
+  startSeconds: number;
+  timestamp: string;
+  text: string;
+}
+
 // helper: fetch YouTube transcript without external packages
-async function getYouTubeTranscript(videoId: string): Promise<string> {
+async function getYouTubeTranscript(videoId: string): Promise<{ transcriptText: string; transcriptSegments: TranscriptSegment[] }> {
+  // Method 1: Try InnerTube API (Android client context) which avoids PO-token botguard blocks on timedtext
+  try {
+    const INNERTUBE_CLIENT_VERSION = '20.10.38';
+    const innerTubeRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`,
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'ANDROID',
+            clientVersion: INNERTUBE_CLIENT_VERSION,
+            hl: 'en',
+            gl: 'US'
+          },
+        },
+        videoId: videoId,
+      }),
+    });
+
+    if (innerTubeRes.ok) {
+      const playerData = await innerTubeRes.json();
+      const captionTracks = playerData.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+      if (captionTracks && Array.isArray(captionTracks) && captionTracks.length > 0) {
+        const track = captionTracks.find((t: any) => t.languageCode === 'en' || t.languageCode === 'en-US') || captionTracks[0];
+        
+        if (track && track.baseUrl) {
+          const json3Url = track.baseUrl.replace(/&fmt=[^&]+/, '') + '&fmt=json3';
+          const transcriptRes = await fetch(json3Url);
+          
+          if (transcriptRes.ok) {
+            const transcriptData = await transcriptRes.json();
+            const events = transcriptData.events || [];
+            const transcriptSegments: TranscriptSegment[] = [];
+
+            for (const event of events) {
+              if (!event.segs || !Array.isArray(event.segs)) continue;
+              const text = event.segs
+                .map((seg: any) => seg.utf8 || '')
+                .join('')
+                .replace(/\r?\n|\r/g, ' ')
+                .trim();
+
+              if (text.length > 0) {
+                const startMs = typeof event.tStartMs === 'number' ? event.tStartMs : parseInt(event.tStartMs || '0', 10);
+                const startSeconds = Math.max(0, Math.floor(startMs / 1000));
+                const timestamp = formatTimestamp(startSeconds);
+                transcriptSegments.push({
+                  startSeconds,
+                  timestamp,
+                  text
+                });
+              }
+            }
+
+            if (transcriptSegments.length > 0) {
+              const transcriptText = transcriptSegments.map(s => s.text).join(' ');
+              return { transcriptText, transcriptSegments };
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("InnerTube transcript fetch failed, attempting HTML fallback:", err);
+  }
+
+  // Method 2: Fallback to HTML watch page scraping
   try {
     const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
@@ -240,20 +330,40 @@ async function getYouTubeTranscript(videoId: string): Promise<string> {
       throw new Error("Failed to fetch caption tracks from YouTube");
     }
     
-    const transcriptData = await transcriptRes.ok ? await transcriptRes.json() : null;
+    const transcriptData = await transcriptRes.json();
     if (!transcriptData || !transcriptData.events) {
       throw new Error("Empty caption tracks received from YouTube");
     }
     
     const events = transcriptData.events || [];
+    const transcriptSegments: TranscriptSegment[] = [];
     
-    // Map events to simple text
-    const textSegments = events
-      .filter((event: any) => event.segs)
-      .map((event: any) => event.segs.map((seg: any) => seg.utf8).join(" "))
-      .join(" ");
-      
-    return textSegments;
+    for (const event of events) {
+      if (!event.segs || !Array.isArray(event.segs)) continue;
+      const text = event.segs
+        .map((seg: any) => seg.utf8 || '')
+        .join('')
+        .replace(/\r?\n|\r/g, ' ')
+        .trim();
+        
+      if (text.length > 0) {
+        const startMs = typeof event.tStartMs === 'number' ? event.tStartMs : parseInt(event.tStartMs || '0', 10);
+        const startSeconds = Math.max(0, Math.floor(startMs / 1000));
+        const timestamp = formatTimestamp(startSeconds);
+        transcriptSegments.push({
+          startSeconds,
+          timestamp,
+          text
+        });
+      }
+    }
+    
+    const transcriptText = transcriptSegments.map(s => s.text).join(" ");
+    
+    return {
+      transcriptText,
+      transcriptSegments
+    };
   } catch (err) {
     console.error("Error in getYouTubeTranscript:", err);
     throw err;
@@ -351,9 +461,12 @@ export async function POST(req: Request) {
     // 3. FETCH YOUTUBE TRANSCRIPT CONTENT
     // ==========================================
     let transcriptText = "";
+    let transcriptSegments: TranscriptSegment[] = [];
     let transcriptError = null;
     try {
-      transcriptText = await getYouTubeTranscript(videoId);
+      const transcriptResult = await getYouTubeTranscript(videoId);
+      transcriptText = transcriptResult.transcriptText;
+      transcriptSegments = transcriptResult.transcriptSegments;
     } catch (err: any) {
       console.warn("Could not retrieve real transcript. Falling back to video description.", err);
       transcriptText = `[No captions available. Video Description: ${description.substring(0, 2000)}]`;
@@ -535,6 +648,7 @@ Return ONLY a valid JSON object matching the interface above. Do not include any
       videoUrl: url,
       channelUrl: `https://youtube.com/channel/${channelId}`,
       transcriptSnippets: geminiData.transcriptSnippets || [],
+      fullTranscript: transcriptSegments,
       repeatedPhrases: geminiData.repeatedPhrases || [],
       ctaOpportunities: geminiData.ctaOpportunities || [],
       subs: formattedSubs,
