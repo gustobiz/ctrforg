@@ -200,7 +200,10 @@ export interface TranscriptSegment {
 export interface TranscriptDebugInfo {
   innerTubeStatus?: number;
   playabilityStatus?: string;
+  playabilityReason?: string;
+  hasCaptionsObject?: boolean;
   captionTracksCount?: number;
+  htmlScrapeCaptionTracks?: number;
   timedTextStatus?: number;
   timedTextBodyLength?: number;
   parsedSegmentsCount?: number;
@@ -239,9 +242,11 @@ async function getYouTubeTranscript(videoId: string): Promise<{ transcriptText: 
 
     if (innerTubeRes.ok) {
       const playerData = await innerTubeRes.json();
-      debugInfo.playabilityStatus = playerData.playabilityStatus?.status;
+      debugInfo.playabilityStatus = playerData.playabilityStatus?.status || 'NO_STATUS';
+      debugInfo.playabilityReason = playerData.playabilityStatus?.reason;
       const captionTracks = playerData.captions?.playerCaptionsTracklistRenderer?.captionTracks;
       debugInfo.captionTracksCount = captionTracks?.length || 0;
+      debugInfo.hasCaptionsObject = !!playerData.captions;
 
       if (captionTracks && Array.isArray(captionTracks) && captionTracks.length > 0) {
         const track = captionTracks.find((t: any) => t.languageCode === 'en' || t.languageCode === 'en-US') || captionTracks[0];
@@ -401,9 +406,10 @@ async function getYouTubeTranscript(videoId: string): Promise<{ transcriptText: 
     
     const playerResponse = JSON.parse(jsonStr);
     const captionTracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    debugInfo.htmlScrapeCaptionTracks = captionTracks?.length || 0;
     
     if (!captionTracks || captionTracks.length === 0) {
-      throw new Error("No captions found for this video.");
+      throw new Error(`No captions found for this video. (InnerTube playability: ${debugInfo.playabilityStatus || 'none'}, tracks: ${debugInfo.captionTracksCount || 0})`);
     }
     
     // Sort or filter for English captions, fallback to the first track
