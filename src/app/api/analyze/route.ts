@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 // helper: parse YouTube ID
 function extractVideoId(url: string): string | null {
   if (!url) return null;
@@ -196,14 +199,16 @@ export interface TranscriptSegment {
 
 // helper: fetch YouTube transcript without external packages
 async function getYouTubeTranscript(videoId: string): Promise<{ transcriptText: string; transcriptSegments: TranscriptSegment[] }> {
+  const INNERTUBE_CLIENT_VERSION = '20.10.38';
+  const userAgent = `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`;
+
   // Method 1: Try InnerTube API (Android client context) which avoids PO-token botguard blocks on timedtext
   try {
-    const INNERTUBE_CLIENT_VERSION = '20.10.38';
     const innerTubeRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`,
+        'User-Agent': userAgent,
       },
       body: JSON.stringify({
         context: {
@@ -227,30 +232,87 @@ async function getYouTubeTranscript(videoId: string): Promise<{ transcriptText: 
         
         if (track && track.baseUrl) {
           const json3Url = track.baseUrl.replace(/&fmt=[^&]+/, '') + '&fmt=json3';
-          const transcriptRes = await fetch(json3Url);
+          const transcriptRes = await fetch(json3Url, {
+            headers: {
+              'User-Agent': userAgent,
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Accept': '*/*'
+            }
+          });
           
           if (transcriptRes.ok) {
-            const transcriptData = await transcriptRes.json();
-            const events = transcriptData.events || [];
+            const rawBody = await transcriptRes.text();
             const transcriptSegments: TranscriptSegment[] = [];
 
-            for (const event of events) {
-              if (!event.segs || !Array.isArray(event.segs)) continue;
-              const text = event.segs
-                .map((seg: any) => seg.utf8 || '')
-                .join('')
-                .replace(/\r?\n|\r/g, ' ')
-                .trim();
+            if (rawBody.trim().startsWith('{')) {
+              // Parse JSON3 format
+              const transcriptData = JSON.parse(rawBody);
+              const events = transcriptData.events || [];
 
-              if (text.length > 0) {
-                const startMs = typeof event.tStartMs === 'number' ? event.tStartMs : parseInt(event.tStartMs || '0', 10);
-                const startSeconds = Math.max(0, Math.floor(startMs / 1000));
-                const timestamp = formatTimestamp(startSeconds);
-                transcriptSegments.push({
-                  startSeconds,
-                  timestamp,
-                  text
-                });
+              for (const event of events) {
+                if (!event.segs || !Array.isArray(event.segs)) continue;
+                const text = event.segs
+                  .map((seg: any) => seg.utf8 || '')
+                  .join('')
+                  .replace(/\r?\n|\r/g, ' ')
+                  .trim();
+
+                if (text.length > 0) {
+                  const startMs = typeof event.tStartMs === 'number' ? event.tStartMs : parseInt(event.tStartMs || '0', 10);
+                  const startSeconds = Math.max(0, Math.floor(startMs / 1000));
+                  const timestamp = formatTimestamp(startSeconds);
+                  transcriptSegments.push({
+                    startSeconds,
+                    timestamp,
+                    text
+                  });
+                }
+              }
+            } else {
+              // Parse XML format (srv3 or standard XML)
+              const pRegex = /<p\s+t="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+              let match;
+              while ((match = pRegex.exec(rawBody)) !== null) {
+                const startMs = parseInt(match[1], 10);
+                const text = match[2]
+                  .replace(/<[^>]+>/g, '')
+                  .replace(/&amp;/g, '&')
+                  .replace(/&quot;/g, '"')
+                  .replace(/&#39;/g, "'")
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/\r?\n|\r/g, ' ')
+                  .trim();
+                if (text.length > 0) {
+                  const startSeconds = Math.max(0, Math.floor(startMs / 1000));
+                  transcriptSegments.push({
+                    startSeconds,
+                    timestamp: formatTimestamp(startSeconds),
+                    text
+                  });
+                }
+              }
+
+              if (transcriptSegments.length === 0) {
+                const textRegex = /<text\s+start="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g;
+                while ((match = textRegex.exec(rawBody)) !== null) {
+                  const startSeconds = Math.max(0, Math.floor(parseFloat(match[1])));
+                  const text = match[2]
+                    .replace(/&amp;/g, '&')
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/\r?\n|\r/g, ' ')
+                    .trim();
+                  if (text.length > 0) {
+                    transcriptSegments.push({
+                      startSeconds,
+                      timestamp: formatTimestamp(startSeconds),
+                      text
+                    });
+                  }
+                }
               }
             }
 
